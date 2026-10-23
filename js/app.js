@@ -11,7 +11,7 @@ function message(text){$('message').textContent=text;$('message').classList.add(
 try{visual=new Visual($('stage'),label=>$('quality').textContent=label);}catch(e){const error=document.createElement('p');error.className='error-screen';error.textContent='Для визуализации нужен WebGL 2. Включите аппаратное ускорение и откройте приложение в современном браузере.';$('stage').append(error);console.error(e);}
 
 const director=new ShowDirector((shape,style)=>{selectShape(shape,false);visual?.kaleidoscope.select(style,false);},enabled=>{
- for(const id of ['auto-shape','auto-style']){$(id).classList.toggle('selected',enabled);$(id).setAttribute('aria-pressed',String(enabled));}
+ $('auto-show').classList.toggle('selected',enabled);$('auto-show').setAttribute('aria-pressed',String(enabled));
  if(visual)visual.kaleidoscope.auto=enabled;
 });
 function selectShape(index,manual=true){
@@ -19,7 +19,12 @@ function selectShape(index,manual=true){
  document.querySelectorAll('[data-shape]').forEach(b=>{const selected=Number(b.dataset.shape)===index;b.classList.toggle('selected',selected);b.setAttribute('aria-pressed',String(selected));});
 }
 document.querySelectorAll('[data-shape]').forEach(b=>b.addEventListener('click',()=>selectShape(Number(b.dataset.shape))));
-for(const id of ['auto-shape','auto-style'])$(id).onclick=()=>{director.setAuto(!director.enabled);message(director.enabled?'Авторежиссёр включён: музыка управляет сценами, цветами и камерой.':'Авторежиссёр выключен. Формы и стили выбираете вы.');};
+$('auto-show').onclick=()=>{director.setAuto(!director.enabled);message(director.enabled?'Авторежиссёр включён: музыка управляет сценами, цветами и камерой.':'Авторежиссёр выключен. Формы и стили выбираете вы.');};
+
+for(const key of ['sensitivity','rotation','brightness','size','effects'])$(key).oninput=e=>{const value=Number(e.target.value)/100;$(key+'-value').value=e.target.value+'%';if(key==='sensitivity')bus.sensitivity=value;else if(visual)visual.controls[key]=value;};
+$('graphics-quality').onchange=e=>visual?.setQuality(e.target.value);
+document.querySelectorAll('[data-palette]').forEach(button=>button.onclick=()=>{if(visual)visual.controls.palette=Number(button.dataset.palette);document.querySelectorAll('[data-palette]').forEach(b=>{b.classList.toggle('selected',b===button);b.setAttribute('aria-pressed',String(b===button));});});
+const figureSettings=document.querySelector('.figure-settings');figureSettings.open=window.innerWidth>=960;figureSettings.addEventListener('toggle',()=>visual?.resize());
 
 if(visual){
  const kaleido=visual.kaleidoscope;kaleido.managed=true;

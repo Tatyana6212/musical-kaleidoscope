@@ -153,10 +153,10 @@ export class Kaleidoscope {
   const u=this.uniforms;u.time.value=time;for(const k of ['beat','bass','mid','high','energy'])u[k].value=music[k];
   u.intensity.value+=(this.intensity-u.intensity.value)*(1-Math.exp(-dt*4));
   u.sectors.value=this.symmetry;
-  if(show){u.hue.value=show.palette;u.saturation.value=show.saturation;u.showGain.value=show.atmosphere+show.accent*.4;}
+  if(show){u.hue.value=show.palette+(this.paletteOffset||0);u.saturation.value=show.saturation;u.showGain.value=show.atmosphere+show.accent*.4;}
   this.tint.setRGB(0,0,0);this.tintSecondary.setRGB(0,0,0);
   for(let i=0;i<5;i++){const a=this.palette[i],b=this.palette[(i+2)%5],w=this.weights[i];this.tint.r+=a.r*w;this.tint.g+=a.g*w;this.tint.b+=a.b*w;this.tintSecondary.r+=b.r*w;this.tintSecondary.g+=b.g*w;this.tintSecondary.b+=b.b*w;}
-  if(show){this.tint.offsetHSL(show.palette*.3,0,0);this.tintSecondary.offsetHSL(show.palette*.3,0,0);}
+  if(show){const hue=(show.palette+(this.paletteOffset||0))*.3;this.tint.offsetHSL(hue,0,0);this.tintSecondary.offsetHSL(hue,0,0);}
  }
  resize(w,h,dpr,centerX,centerY){this.uniforms.resolution.value.set(w,h);this.uniforms.center.value.set(centerX,centerY);this.targetTexture.setSize(Math.max(1,Math.round(w*dpr*.5)),Math.max(1,Math.round(h*dpr*.5)));}
  render(renderer){renderer.setRenderTarget(this.targetTexture);renderer.render(this.scene,this.camera);}

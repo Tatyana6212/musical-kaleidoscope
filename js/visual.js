@@ -1,5 +1,6 @@
 import * as T from '../vendor/three.module.js';
 import {Kaleidoscope} from './kaleidoscope.js';
+import {SpectralFountain} from './fountain.js';
 
 const vertex=`
 attribute vec3 target, surfaceNormal, targetNormal;
@@ -11,7 +12,7 @@ vec3 smoothNormal=normalize(mix(surfaceNormal,targetNormal,morph));
 vNormal=normalMatrix*normalize(smoothNormal+n*wave*.025);
 vec4 mv=modelViewMatrix*vec4(p,1.);vView=mv.xyz;gl_Position=projectionMatrix*mv;}`;
 const fragment=`
-uniform float time,mid,energy,volume,beat,hue,saturation,showAccent;varying vec3 vP,vView,vNormal;
+uniform float time,mid,energy,volume,beat,hue,saturation,showAccent,brightness;varying vec3 vP,vView,vNormal;
 vec3 palette(float t){
   vec3 violet=vec3(.24,.025,.55),pink=vec3(.95,.055,.34);
   vec3 amber=vec3(1.,.37,.045),cyan=vec3(.035,.57,.66);
@@ -35,7 +36,7 @@ color+=palette(flow+.83)*rim*(.7+volume*.4+beat*.75);
 color+=mix(col,vec3(1.,.78,.65),.65)*softSpec*.65;
 color+=vec3(.4,.85,1.)*glint*.65;
 color=mix(vec3(dot(color,vec3(.2126,.7152,.0722))),color,saturation);
-gl_FragColor=vec4(color*(1.+volume*.35+beat*.85+showAccent*.75),1.);}`;
+gl_FragColor=vec4(color*(1.+volume*.35+beat*.85+showAccent*.75)*brightness,1.);}`;
 
 // Identical UV triangle layout for all shapes, including the torus. Only the
 // attributes change at selection; the transition itself is evaluated on GPU.
@@ -62,31 +63,32 @@ function shapes(){
 export class Visual {
  constructor(host,onQuality){
   this.host=host;this.onQuality=onQuality;this.renderer=new T.WebGLRenderer({antialias:false,powerPreference:'high-performance'});host.append(this.renderer.domElement);this.renderer.setClearColor(0x07080b);this.scene=new T.Scene();this.camera=new T.PerspectiveCamera(38,1,.1,60);this.camera.position.set(0,0,7.5);
-  this.uniforms={time:{value:0},morph:{value:1},bass:{value:0},mid:{value:0},energy:{value:0},volume:{value:0},beat:{value:0},hue:{value:0},saturation:{value:1},showAccent:{value:0}};
+  this.uniforms={time:{value:0},morph:{value:1},bass:{value:0},mid:{value:0},energy:{value:0},volume:{value:0},beat:{value:0},hue:{value:0},saturation:{value:1},showAccent:{value:0},brightness:{value:1},effects:{value:1}};
+  this.controls={rotation:1,brightness:1,size:1,effects:1,palette:0};this.qualityMode='auto';
   const data=shapes();this.arrays=data.arrays;this.normals=data.normals;this.geometry=new T.BufferGeometry();this.geometry.setAttribute('position',new T.BufferAttribute(data.arrays[0].slice(),3));this.geometry.setAttribute('target',new T.BufferAttribute(data.arrays[0].slice(),3));this.geometry.setAttribute('surfaceNormal',new T.BufferAttribute(data.normals[0].slice(),3));this.geometry.setAttribute('targetNormal',new T.BufferAttribute(data.normals[0].slice(),3));this.geometry.boundingSphere=new T.Sphere(new T.Vector3(),3);
   // Smooth pearlescent skin: no wire overlay or duplicate inner silhouette.
   this.material=new T.ShaderMaterial({uniforms:this.uniforms,vertexShader:vertex,fragmentShader:fragment,side:T.DoubleSide});this.group=new T.Group();this.mesh=new T.Mesh(this.geometry,this.material);this.group.add(this.mesh);this.scene.add(this.group);this.group.rotation.set(.15,.2,-.13);
   this.kaleidoscope=new Kaleidoscope();this.scene.background=this.kaleidoscope.targetTexture.texture;
-  this.makeAtmosphere();this.makeBeatEffects();this.makePost();this.quality=1;this.slow=0;this.frames=0;this.totalTime=0;this.drag=false;this.vx=0;this.vy=0;this.auto=1;
+  this.makeAtmosphere();this.makeBeatEffects();this.makePost();this.fountain=new SpectralFountain(this.kaleidoscope.tint,this.kaleidoscope.tintSecondary);this.scene.add(this.fountain.group);this.quality=1;this.slow=0;this.frames=0;this.totalTime=0;this.drag=false;this.vx=0;this.vy=0;this.auto=1;
   this.interactionHold=0;this.userCamera={yaw:0,pitch:0,zoom:1};this.cameraMotion={yaw:0,pitch:0,zoom:1};this.frameCenter=new T.Vector2(.58,.5);this.averageFps=60;this.bind();this.resize();
  }
  makeAtmosphere(){
   const count=1800,p=new Float32Array(count*3),seed=new Float32Array(count);for(let i=0;i<count;i++){p[i*3]=(Math.random()-.5)*17;p[i*3+1]=(Math.random()-.5)*11;p[i*3+2]=(Math.random()-.5)*13;seed[i]=Math.random();}
   const g=new T.BufferGeometry();g.setAttribute('position',new T.BufferAttribute(p,3));g.setAttribute('seed',new T.BufferAttribute(seed,1));this.particleGeometry=g;
-  this.particleUniforms={time:this.uniforms.time,high:{value:0},energy:this.uniforms.energy,pixel:{value:1},tint:{value:this.kaleidoscope.tint},tintSecondary:{value:this.kaleidoscope.tintSecondary}};
-  this.particles=new T.Points(g,new T.ShaderMaterial({uniforms:this.particleUniforms,transparent:true,depthWrite:false,blending:T.AdditiveBlending,vertexShader:`attribute float seed;uniform float time,high,pixel;varying float s;void main(){s=seed;vec3 p=position;p.x+=sin(time*.07+seed*12.)*.7;p.y+=sin(time*.1+seed*20.)*.5;p.z+=sin(time*.08+seed*30.)*1.2;vec4 mv=modelViewMatrix*vec4(p,1.);gl_PointSize=min(28.,(1.5+pow(seed,12.)*30.+high*4.)*pixel*6./max(1.,-mv.z));gl_Position=projectionMatrix*mv;}`,fragmentShader:`uniform float time,high;uniform vec3 tint,tintSecondary;varying float s;void main(){float d=length(gl_PointCoord-.5)*2.;if(d>1.)discard;float a=pow(1.-d,3.)*(.3+high*.65)*(.7+.3*sin(time*(1.+high*4.)+s*40.));vec3 c=mix(tint,tintSecondary,s);gl_FragColor=vec4(c,a);}`}));this.scene.add(this.particles);
+  this.particleUniforms={fx:this.uniforms.effects,time:this.uniforms.time,high:{value:0},energy:this.uniforms.energy,pixel:{value:1},tint:{value:this.kaleidoscope.tint},tintSecondary:{value:this.kaleidoscope.tintSecondary}};
+  this.particles=new T.Points(g,new T.ShaderMaterial({uniforms:this.particleUniforms,transparent:true,depthWrite:false,blending:T.AdditiveBlending,vertexShader:`attribute float seed;uniform float time,high,pixel;varying float s;void main(){s=seed;vec3 p=position;p.x+=sin(time*.07+seed*12.)*.7;p.y+=sin(time*.1+seed*20.)*.5;p.z+=sin(time*.08+seed*30.)*1.2;vec4 mv=modelViewMatrix*vec4(p,1.);gl_PointSize=min(28.,(1.5+pow(seed,12.)*30.+high*4.)*pixel*6./max(1.,-mv.z));gl_Position=projectionMatrix*mv;}`,fragmentShader:`uniform float time,high,fx;uniform vec3 tint,tintSecondary;varying float s;void main(){float d=length(gl_PointCoord-.5)*2.;if(d>1.)discard;float a=pow(1.-d,3.)*(.3+high*.65)*(.7+.3*sin(time*(1.+high*4.)+s*40.));vec3 c=mix(tint,tintSecondary,s);gl_FragColor=vec4(c,a*fx);}`}));this.scene.add(this.particles);
   this.orbits=new T.Group();this.scene.add(this.orbits);for(let k=0;k<5;k++){const verts=[],colors=[];const color=new T.Color();for(let i=0;i<=256;i++){let a=i/256*Math.PI*2;verts.push(Math.cos(a)*(2.05+k*.12),Math.sin(a)*(2.05+k*.12),0);color.setHSL(.47+i/256*.35,.7,.5);colors.push(color.r,color.g,color.b);}let geo=new T.BufferGeometry();geo.setAttribute('position',new T.Float32BufferAttribute(verts,3));geo.setAttribute('color',new T.Float32BufferAttribute(colors,3));const line=new T.Line(geo,new T.LineBasicMaterial({vertexColors:true,transparent:true,opacity:.08+k*.012,blending:T.AdditiveBlending,depthWrite:false}));line.rotation.set(.95+k*.2,.2+k*.5,k*.6);this.orbits.add(line);}
   // One generated glow texture, shared by all atmospheric sprites.
   const canvas=document.createElement('canvas');canvas.width=canvas.height=128;const ctx=canvas.getContext('2d'),grad=ctx.createRadialGradient(64,64,0,64,64,64);grad.addColorStop(0,'#ffffff');grad.addColorStop(.15,'#ffffff80');grad.addColorStop(.5,'#ffffff19');grad.addColorStop(1,'#ffffff00');ctx.fillStyle=grad;ctx.fillRect(0,0,128,128);const texture=new T.CanvasTexture(canvas);this.glows=[];
   [[0,0,-2,6,0x127c78,.15],[1,-.5,-4,6,0x8d2259,.13],[-2,1,-5,8,0x153c50,.11],[-2.9,.8,1.3,3,0x65cbb3,.04],[2.8,-.8,2,2.4,0xa66ec4,.04],[-3,-2,3,1.2,0x94c5d9,.035],[3,2,-1,1.8,0xcc87b0,.05]].forEach(([x,y,z,size,color,opacity])=>{const sp=new T.Sprite(new T.SpriteMaterial({map:texture,color,transparent:true,opacity,blending:T.AdditiveBlending,depthWrite:false}));sp.position.set(x,y,z);sp.scale.set(size,size,1);sp.userData.opacity=opacity;this.scene.add(sp);this.glows.push(sp);});
   const rayGeometry=new T.PlaneGeometry(1,1);this.rays=new T.Group();
-  const rayMaterial=new T.ShaderMaterial({uniforms:{time:this.uniforms.time,energy:this.uniforms.energy,beat:this.uniforms.beat,tint:{value:this.kaleidoscope.tint}},transparent:true,depthWrite:false,side:T.DoubleSide,blending:T.AdditiveBlending,vertexShader:`varying vec2 vUv;void main(){vUv=uv;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.);}`,fragmentShader:`varying vec2 vUv;uniform float time,energy,beat;uniform vec3 tint;void main(){float width=.09+.12*vUv.y;float shaft=exp(-pow((vUv.x-.5)/width,2.));float fade=pow(sin(vUv.y*3.14159),2.);float haze=.7+.3*sin(vUv.y*9.+time*.14);gl_FragColor=vec4(tint,shaft*fade*haze*(.025+energy*.035+beat*.025));}`});
+  const rayMaterial=new T.ShaderMaterial({uniforms:{time:this.uniforms.time,energy:this.uniforms.energy,beat:this.uniforms.beat,fx:this.uniforms.effects,tint:{value:this.kaleidoscope.tint}},transparent:true,depthWrite:false,side:T.DoubleSide,blending:T.AdditiveBlending,vertexShader:`varying vec2 vUv;void main(){vUv=uv;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.);}`,fragmentShader:`varying vec2 vUv;uniform float time,energy,beat,fx;uniform vec3 tint;void main(){float width=.09+.12*vUv.y;float shaft=exp(-pow((vUv.x-.5)/width,2.));float fade=pow(sin(vUv.y*3.14159),2.);float haze=.7+.3*sin(vUv.y*9.+time*.14);gl_FragColor=vec4(tint,shaft*fade*haze*(.025+energy*.035+beat*.025)*fx);}`});
   for(let i=0;i<7;i++){const ray=new T.Mesh(rayGeometry,rayMaterial);ray.position.set((i-3)*1.45,.5,-3+(i%3)*2.3);ray.scale.set(.65+i%2*.6,9+i%3,1);ray.rotation.z=(i-3)*-.17;this.rays.add(ray);}this.scene.add(this.rays);
  }
  makeBeatEffects(){
   // Four fixed slots allow overlapping beats without allocating per hit.
   this.beatWaves=[];const geometry=new T.RingGeometry(1,1.026,128);
-  this.burstUniforms={pulses:{value:Array.from({length:4},()=>new T.Vector4(2,0,0,0))},pixel:{value:1},tint:{value:this.kaleidoscope.tint},tintSecondary:{value:this.kaleidoscope.tintSecondary}};
+  this.burstUniforms={fx:this.uniforms.effects,pulses:{value:Array.from({length:4},()=>new T.Vector4(2,0,0,0))},pixel:{value:1},tint:{value:this.kaleidoscope.tint},tintSecondary:{value:this.kaleidoscope.tintSecondary}};
   for(let i=0;i<4;i++){
    const material=new T.MeshBasicMaterial({color:i%2?0xf778ba:0x8effec,transparent:true,opacity:0,blending:T.AdditiveBlending,side:T.DoubleSide,depthWrite:false});
    const wave=new T.Mesh(geometry,material);wave.visible=false;this.scene.add(wave);this.beatWaves.push(wave);
@@ -100,7 +102,7 @@ export class Visual {
     float radius=1.5+age*(2.5+seed*1.5);vec3 p=position*radius;p.y-=age*age*.3;
     alpha=alive*strength*pow(max(0.,1.-age/1.05),2.)*min(1.,age/.012);
     vTint=mix(tint,tintSecondary,seed);vec4 mv=modelViewMatrix*vec4(p,1.);gl_PointSize=(2.+seed*3.)*pixel*5./max(1.,-mv.z);gl_Position=projectionMatrix*mv;}`,
-   fragmentShader:`varying float alpha;varying vec3 vTint;void main(){float r=length(gl_PointCoord-.5)*2.;if(r>1.)discard;gl_FragColor=vec4(vTint,alpha*pow(1.-r,1.6));}`}));this.scene.add(this.burst);
+   fragmentShader:`uniform float fx;varying float alpha;varying vec3 vTint;void main(){float r=length(gl_PointCoord-.5)*2.;if(r>1.)discard;gl_FragColor=vec4(vTint,alpha*pow(1.-r,1.6)*fx);}`}));this.scene.add(this.burst);
  }
  makePost(){
   this.base=new T.WebGLRenderTarget(1,1);this.bloom=new T.WebGLRenderTarget(1,1,{depthBuffer:false});this.postScene=new T.Scene();this.postCamera=new T.OrthographicCamera(-1,1,1,-1,0,1);this.postUniforms={image:{value:this.base.texture},glow:{value:this.bloom.texture},texel:{value:new T.Vector2()},pass:{value:0},energy:this.uniforms.energy};
@@ -120,7 +122,7 @@ export class Visual {
   const freeWidth=sidebar?Math.max(300,bounds.left-28):w;
   const top=hidden?h*.07:w<760?116:96,bottom=hidden?h*.93:sidebar?h-28:bounds.top-hostTop-20;
   const available=Math.max(145,bottom-top),centerY=top+available*.5,centerX=sidebar?freeWidth*.5/w:.5;
-  this.diameter=Math.min(freeWidth*.8,available*.9);this.layoutX=centerX;this.layoutY=centerY/h;
+  this.diameter=Math.min(freeWidth*.8,available*.9);this.freeWidth=freeWidth;this.freeHeight=available;this.layoutX=centerX;this.layoutY=centerY/h;
   const dpr=Math.min(devicePixelRatio,1.65)*this.quality;
   this.renderer.setPixelRatio(dpr);this.renderer.setSize(w,h);this.camera.aspect=w/h;
   this.camera.setViewOffset(w,h,w*(.5-this.frameCenter.x),h*(.5-this.frameCenter.y),w,h);this.camera.updateProjectionMatrix();
@@ -133,7 +135,8 @@ export class Visual {
   m.yaw+=((manual?u.yaw:show.cameraYaw+u.yaw)-m.yaw)*ease;m.pitch+=((manual?u.pitch:show.cameraPitch+u.pitch)-m.pitch)*ease;m.zoom+=((manual?u.zoom:show.zoom*u.zoom)-m.zoom)*ease;
   this.frameCenter.x+=(this.layoutX-this.frameCenter.x)*ease;this.frameCenter.y+=(this.layoutY-this.frameCenter.y)*ease;
   const fov=this.camera.fov+(show.fov-this.camera.fov)*returnEase,tan=Math.tan(fov*Math.PI/360);
-  const wanted=4.65*this.height/(2*tan*this.diameter)*m.zoom,safe=4.35*this.height/(2*tan*this.diameter);
+  const extent=5.5+Math.max(0,this.controls.size-1)*2.6;
+  const wanted=4.65*this.height/(2*tan*this.diameter)*m.zoom,safe=Math.max(4.35*this.height/(2*tan*this.diameter),extent*this.height/(2*tan*this.freeWidth*.92));
   m.distance??=wanted;m.distance+=(wanted-m.distance)*ease;const distance=Math.max(m.distance,safe);
   this.camera.position.set(Math.sin(m.yaw)*distance,Math.sin(m.pitch)*distance,Math.cos(m.yaw)*distance);this.camera.lookAt(0,0,0);
   this.camera.fov=fov;this.camera.setViewOffset(this.width,this.height,this.width*(.5-this.frameCenter.x),this.height*(.5-this.frameCenter.y),this.width,this.height);this.camera.updateProjectionMatrix();
@@ -141,18 +144,22 @@ export class Visual {
  }
  update(dt,t,music,show){if(this.lost)return;const u=this.uniforms;u.time.value=t;for(const k of ['bass','mid','energy','volume','beat'])u[k].value=music[k];this.particleUniforms.high.value=music.high;
   this.averageFps+=(Math.min(120,1/Math.max(.001,dt))-this.averageFps)*(1-Math.exp(-dt));
-  u.hue.value=show.palette;u.saturation.value=show.saturation;u.showAccent.value=show.accent;
-  this.updateCamera(dt,show);this.kaleidoscope.update(dt,t,music,show);
+  const controls=this.controls,fx=controls.effects;
+  u.hue.value=show.palette+controls.palette;u.saturation.value=show.saturation;u.showAccent.value=show.accent;u.brightness.value+=(controls.brightness-u.brightness.value)*(1-Math.exp(-dt*6));u.effects.value=fx;
+  this.kaleidoscope.paletteOffset=controls.palette;this.updateCamera(dt,show);this.kaleidoscope.update(dt,t,music,show);this.fountain.update(t,music,controls.size,fx*show.atmosphere);
   if(u.morph.value<1){this.morphTime+=dt/2.1;const x=Math.min(1,this.morphTime);u.morph.value=x*x*(3-2*x);}
-  this.group.scale.setScalar(1+.15*music.beat);
+  this.group.scale.setScalar(controls.size*(1+.15*music.beat));
   for(let i=0;i<4;i++){const pulse=music.pulses[i],age=pulse?.age??2,strength=pulse?.strength??0,wave=this.beatWaves[i];this.burstUniforms.pulses.value[i].set(age,strength,0,0);wave.material.color.copy(i%2?this.kaleidoscope.tintSecondary:this.kaleidoscope.tint);wave.visible=age<1.05&&strength>0;if(wave.visible){wave.scale.setScalar(1.55+age*3.1);wave.material.opacity=strength*Math.min(1,age/.012)*Math.exp(-age*4.4)*.75;}}
-  this.auto+=((this.drag||this.artist?.drawing?0:1)-this.auto)*(1-Math.exp(-dt*2));this.group.rotation.y+=dt*(.13+music.energy*.045)*show.motion*this.auto+this.vy;this.group.rotation.x+=dt*.032*show.motion*this.auto+this.vx;const damping=Math.exp(-dt*12);this.vx*=damping;this.vy*=damping;
+  this.auto+=((this.drag||this.artist?.drawing?0:1)-this.auto)*(1-Math.exp(-dt*2));this.group.rotation.y+=dt*(.13+music.energy*.045)*show.motion*controls.rotation*this.auto+this.vy;this.group.rotation.x+=dt*.032*show.motion*controls.rotation*this.auto+this.vx;const damping=Math.exp(-dt*12);this.vx*=damping;this.vy*=damping;
   this.orbits.rotation.y=t*.025;this.orbits.rotation.z=Math.sin(t*.05)*.15;this.particles.rotation.y=t*.008;this.rays.rotation.z=Math.sin(t*.07)*.06;
-  this.orbits.children.forEach(line=>{line.material.color.copy(this.kaleidoscope.tint);line.material.opacity=.045+music.energy*.04;});
-  this.glows.forEach((g,i)=>{g.material.color.copy(this.kaleidoscope.tint).lerp(this.kaleidoscope.tintSecondary,(i%3)*.5);g.material.opacity=(g.userData.opacity+music.volume*.05+music.beat*.025)*(1+Math.sin(t*.3+i)*.15)*show.atmosphere;});
+  this.orbits.children.forEach(line=>{line.material.color.copy(this.kaleidoscope.tint);line.material.opacity=(.045+music.energy*.04)*fx;});
+  this.particles.visible=this.rays.visible=this.burst.visible=fx>.001;
+  this.beatWaves.forEach(wave=>{wave.material.opacity*=fx;if(fx===0)wave.visible=false;});
+  this.glows.forEach((g,i)=>{g.material.color.copy(this.kaleidoscope.tint).lerp(this.kaleidoscope.tintSecondary,(i%3)*.5);g.material.opacity=(g.userData.opacity+music.volume*.05+music.beat*.025)*(1+Math.sin(t*.3+i)*.15)*show.atmosphere*fx;});
   const r=this.renderer;this.kaleidoscope.render(r);r.setRenderTarget(this.base);r.render(this.scene,this.camera);this.postUniforms.pass.value=0;this.postUniforms.glow.value=null;r.setRenderTarget(this.bloom);r.render(this.postScene,this.postCamera);this.postUniforms.pass.value=1;this.postUniforms.glow.value=this.bloom.texture;r.setRenderTarget(null);r.render(this.postScene,this.postCamera);
-  if(dt<.2){this.frames++;this.totalTime+=dt;if(this.frames>=150){const fps=this.frames/this.totalTime;if(fps<43)this.slow++;else this.slow=0;if(this.slow>=2&&this.quality>.55){this.quality=Math.max(.55,this.quality-.2);this.particleGeometry.setDrawRange(0,Math.floor(1800*this.quality));this.resize();this.onQuality('ЭКОНОМНЫЙ РЕЖИМ');this.slow=0;}this.frames=0;this.totalTime=0;}}
+  if(dt<.2&&this.qualityMode==='auto'){this.frames++;this.totalTime+=dt;if(this.frames>=150){const fps=this.frames/this.totalTime;if(fps<43)this.slow++;else this.slow=0;if(this.slow>=2&&this.quality>.55){this.quality=Math.max(.55,this.quality-.2);this.particleGeometry.setDrawRange(0,Math.floor(1800*this.quality));this.resize();this.onQuality('ЭКОНОМНЫЙ РЕЖИМ');this.slow=0;}this.frames=0;this.totalTime=0;}}
  }
+ setQuality(mode){this.qualityMode=mode;this.quality=({auto:1,high:1,balanced:.78,low:.55})[mode]??1;this.frames=this.totalTime=this.slow=0;this.particleGeometry.setDrawRange(0,Math.floor(1800*this.quality));this.resize();}
  dispose(){
   this.kaleidoscope.dispose();this.base.dispose();this.bloom.dispose();
   const geometries=new Set(),materials=new Set(),textures=new Set();

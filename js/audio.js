@@ -1,14 +1,28 @@
 import {TrackAnalysis,RhythmTimeline} from './rhythm.js';
 // Meyda supplies atmosphere only. Precomputed events supply every beat effect.
 export class MusicParameters {
-  constructor(){this.target={volume:0,bass:0,mid:0,high:0,energy:0};this.value={...this.target,beat:0,bpm:0,phase:0,pulses:[]};}
+  constructor(){this.target={volume:0,bass:0,mid:0,high:0,energy:0};this.smooth={...this.target};this.sensitivity=1;this.spectrumTarget=new Float32Array(64);this.spectrumSmooth=new Float32Array(64);this.value={...this.target,beat:0,bpm:0,phase:0,pulses:Array.from({length:4},()=>({age:2,strength:0})),spectrum:new Float32Array(64)};}
   ingest(f,sampleRate){
     const s=f.amplitudeSpectrum, bin=sampleRate/(s.length*2);
     const band=(lo,hi)=>{let total=0,n=0;for(let i=Math.max(1,Math.floor(lo/bin));i<Math.min(s.length,hi/bin);i++){total+=s[i]*s[i];n++;}return Math.min(1,Math.sqrt(total)/s.length*5);};
     const bass=band(35,250),mid=band(250,3500),high=band(3500,14000),volume=Math.min(1,f.rms*4);
     Object.assign(this.target,{volume,bass,mid,high,energy:volume*.6+bass*.25+high*.15});
+    for(let band=0;band<64;band++){
+      const lo=40*Math.pow(400,band/64),hi=40*Math.pow(400,(band+1)/64),start=Math.max(1,Math.floor(lo/bin)),end=Math.min(s.length,Math.max(start+1,Math.ceil(hi/bin)));let peak=0,power=0;
+      for(let i=start;i<end;i++){peak=Math.max(peak,s[i]);power+=s[i]*s[i];}
+      const amplitude=(peak*.65+Math.sqrt(power/Math.max(1,end-start))*.35)/s.length*4;
+      this.spectrumTarget[band]=Math.min(1,Math.log1p(amplitude*30)/Math.log(31));
+    }
   }
-  update(dt,playing,rhythm){if(!playing)for(const k in this.target)this.target[k]=0;const a=1-Math.exp(-dt*5);for(const k in this.target)this.value[k]+=(this.target[k]-this.value[k])*a;Object.assign(this.value,rhythm);return this.value;}
+  update(dt,playing,rhythm){
+    if(!playing){for(const k in this.target)this.target[k]=0;this.spectrumTarget.fill(0);}
+    const a=1-Math.exp(-dt*5),gain=this.sensitivity;
+    for(const k in this.target){this.smooth[k]+=(this.target[k]-this.smooth[k])*a;this.value[k]=Math.min(1,this.smooth[k]*gain);}
+    for(let i=0;i<64;i++){const target=this.spectrumTarget[i],speed=target>this.spectrumSmooth[i]?15:4;this.spectrumSmooth[i]+=(target-this.spectrumSmooth[i])*(1-Math.exp(-dt*speed));this.value.spectrum[i]=Math.min(1,this.spectrumSmooth[i]*gain);}
+    this.value.beat=Math.min(1,rhythm.beat*gain);this.value.bpm=rhythm.bpm;this.value.phase=rhythm.phase;
+    for(let i=0;i<4;i++){const p=rhythm.pulses[i],out=this.value.pulses[i];out.age=p?.age??2;out.strength=Math.min(1,(p?.strength??0)*gain);}
+    return this.value;
+  }
 }
 
 export class Player extends EventTarget {
